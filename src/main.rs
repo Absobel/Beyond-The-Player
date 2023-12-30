@@ -9,8 +9,8 @@ fn main() {
         // Set commands
         .add_systems(Update,
             (
-                move_player,
-                conveyor_move.after(move_player),
+                move_good_level_wall,
+                conveyor_move.after(move_good_level_wall),
             )
         )
         // Process commands
@@ -55,10 +55,10 @@ struct Movable;
 struct Immovable;
 
 #[derive(Component)]
-struct Player;
+struct GoodLevelWall;
 
 #[derive(Component)]
-struct Wall;
+struct BadLevelWall;
 
 #[derive(Component)]
 struct BoxBlock;
@@ -92,16 +92,16 @@ impl Direction {
 /// BUNDLES
 
 #[derive(Bundle)]
-struct PlayerBundle {
-    player: Player,
+struct GoodLevelWallBundle {
+    good_level_wall: GoodLevelWall,
     movable: Movable,
     position: Position,
     sprite: SpriteBundle,
 }
 
 #[derive(Bundle)]
-struct WallBundle {
-    wall: Wall,
+struct BadLevelWallBundle {
+    bad_level_wall: BadLevelWall,
     immovable: Immovable,
     position: Position,
     sprite: SpriteBundle,
@@ -140,15 +140,15 @@ fn setup(mut commands: Commands) {
         ..Default::default()
     });
 
-    let player_pos = Position {
+    let good_level_wall_pos = Position {
         x: LEVEL_X_MAX / 2,
         y: LEVEL_Y_MAX / 2,
     };
 
-    commands.spawn(PlayerBundle {
-        player: Player,
+    commands.spawn(GoodLevelWallBundle {
+        good_level_wall: GoodLevelWall,
         movable: Movable,
-        position: player_pos,
+        position: good_level_wall_pos,
         sprite: SpriteBundle {
             sprite: Sprite {
                 color: Color::MIDNIGHT_BLUE,
@@ -160,8 +160,8 @@ fn setup(mut commands: Commands) {
         },
     });
 
-    commands.spawn(PlayerBundle {
-        player: Player,
+    commands.spawn(GoodLevelWallBundle {
+        good_level_wall: GoodLevelWall,
         movable: Movable,
         position: Position { x: 0, y: 0 },
         sprite: SpriteBundle {
@@ -175,8 +175,8 @@ fn setup(mut commands: Commands) {
         },
     });
 
-    commands.spawn(WallBundle {
-        wall: Wall,
+    commands.spawn(BadLevelWallBundle {
+        bad_level_wall: BadLevelWall,
         immovable: Immovable,
         position: Position { x: 3, y: 6 },
         sprite: SpriteBundle {
@@ -261,7 +261,7 @@ fn process_move(mut move_commands: ResMut<MoveCommands>, mut movable_query: Quer
     move_commands.commands.clear();
 }
 
-fn move_player(keyboard_input: Res<Input<KeyCode>>, query: Query<(Entity, &Position), With<Player>>, mut move_commands: ResMut<MoveCommands>) {
+fn move_good_level_wall(keyboard_input: Res<Input<KeyCode>>, query: Query<(Entity, &Position), With<GoodLevelWall>>, mut move_commands: ResMut<MoveCommands>) {
     let delta = {
         if keyboard_input.just_pressed(KeyCode::Left) {
             (-1, 0)
@@ -277,7 +277,7 @@ fn move_player(keyboard_input: Res<Input<KeyCode>>, query: Query<(Entity, &Posit
     };
 
     move_commands.commands.push(MoveCommand {
-        entities: query.iter().map(|player| player.0).collect(),
+        entities: query.iter().map(|good_level_wall| good_level_wall.0).collect(),
         delta,
     });
 }
