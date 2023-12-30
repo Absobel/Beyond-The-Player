@@ -7,12 +7,8 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
         // Set commands
-        .add_systems(Update,
-            (
-                move_good_level_wall,
-                conveyor_move.after(move_good_level_wall),
-            )
-        )
+        .add_systems(Update, move_good_level_wall)
+        .add_systems(Update, conveyor_move.after(move_good_level_wall))
         // Process commands
         .add_systems(Update, process_move.after(conveyor_move))
         // Display
@@ -46,6 +42,28 @@ struct MoveCommands {
     commands: Vec<MoveCommand>,
 }
 
+// COMPONENTS UTILS
+
+#[allow(dead_code)]
+#[derive(Debug)]
+enum Dir {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+impl Dir {
+    fn to_delta(&self) -> (i16, i16) {
+        match self {
+            Dir::Left => (-1, 0),
+            Dir::Right => (1, 0),
+            Dir::Up => (0, 1),
+            Dir::Down => (0, -1),
+        }
+    }
+}
+
 /// MARKER COMPONENTS
 
 #[derive(Component)]
@@ -66,7 +84,7 @@ struct BoxBlock;
 #[derive(Component)]
 struct Conveyor;
 
-/// UTILS COMPONENTS
+/// OTHER COMPONENTS
 
 #[derive(Component, PartialEq, Eq, Hash, Debug)]
 struct Position {
@@ -123,6 +141,75 @@ struct ConveyorBundle {
     sprite: SpriteBundle,
 }
 
+/// SYSTEMS UTILS
+
+fn spawn_good_level_wall(commands: &mut Commands, position: Position) {
+    commands.spawn(GoodLevelWallBundle {
+        good_level_wall: GoodLevelWall,
+        movable: Movable,
+        position,
+        sprite: SpriteBundle {
+            sprite: Sprite {
+                color: Color::MIDNIGHT_BLUE,
+                custom_size: Some(Vec2::new(GRID_SQUARE_SIZE as f32, GRID_SQUARE_SIZE as f32)),
+                ..Default::default()
+            },
+            transform: Transform::default().with_translation(Vec3::new(0.0, 0.0, 1.0)),
+            ..Default::default()
+        },
+    });
+}
+
+fn spawn_bad_level_wall(commands: &mut Commands, position: Position) {
+    commands.spawn(BadLevelWallBundle {
+        bad_level_wall: BadLevelWall,
+        immovable: Immovable,
+        position,
+        sprite: SpriteBundle {
+            sprite: Sprite {
+                color: Color::BLACK,
+                custom_size: Some(Vec2::new(GRID_SQUARE_SIZE as f32, GRID_SQUARE_SIZE as f32)),
+                ..Default::default()
+            },
+            transform: Transform::default().with_translation(Vec3::new(0.0, 0.0, 1.0)),
+            ..Default::default()
+        },
+    });
+}
+
+fn spawn_box(commands: &mut Commands, position: Position) {
+    commands.spawn(BoxBundle {
+        box_block: BoxBlock,
+        movable: Movable,
+        position,
+        sprite: SpriteBundle {
+            sprite: Sprite {
+                color: Color::RED,
+                custom_size: Some(Vec2::new(GRID_SQUARE_SIZE as f32, GRID_SQUARE_SIZE as f32)),
+                ..Default::default()
+            },
+            transform: Transform::default().with_translation(Vec3::new(0.0, 0.0, 1.0)),
+            ..Default::default()
+        },
+    });
+}
+
+fn spawn_conveyor(commands: &mut Commands, position: Position, direction: Direction) {
+    commands.spawn(ConveyorBundle {
+        conveyor: Conveyor,
+        position,
+        direction,
+        sprite: SpriteBundle {
+            sprite: Sprite {
+                color: Color::GREEN,
+                custom_size: Some(Vec2::new(GRID_SQUARE_SIZE as f32, GRID_SQUARE_SIZE as f32)),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    });
+}
+
 /// SYSTEMS
 
 fn setup(mut commands: Commands) {
@@ -145,79 +232,15 @@ fn setup(mut commands: Commands) {
         y: LEVEL_Y_MAX / 2,
     };
 
-    commands.spawn(GoodLevelWallBundle {
-        good_level_wall: GoodLevelWall,
-        movable: Movable,
-        position: good_level_wall_pos,
-        sprite: SpriteBundle {
-            sprite: Sprite {
-                color: Color::MIDNIGHT_BLUE,
-                custom_size: Some(Vec2::new(GRID_SQUARE_SIZE as f32, GRID_SQUARE_SIZE as f32)),
-                ..Default::default()
-            },
-            transform: Transform::default().with_translation(Vec3::new(0.0, 0.0, 1.0)),
-            ..Default::default()
-        },
-    });
+    spawn_good_level_wall(&mut commands, good_level_wall_pos);
+    spawn_good_level_wall(&mut commands, Position { x: 0, y: 0 });
 
-    commands.spawn(GoodLevelWallBundle {
-        good_level_wall: GoodLevelWall,
-        movable: Movable,
-        position: Position { x: 0, y: 0 },
-        sprite: SpriteBundle {
-            sprite: Sprite {
-                color: Color::MIDNIGHT_BLUE,
-                custom_size: Some(Vec2::new(GRID_SQUARE_SIZE as f32, GRID_SQUARE_SIZE as f32)),
-                ..Default::default()
-            },
-            transform: Transform::default().with_translation(Vec3::new(0.0, 0.0, 1.0)),
-            ..Default::default()
-        },
-    });
+    spawn_bad_level_wall(&mut commands, Position { x: 3, y: 6 });
 
-    commands.spawn(BadLevelWallBundle {
-        bad_level_wall: BadLevelWall,
-        immovable: Immovable,
-        position: Position { x: 3, y: 6 },
-        sprite: SpriteBundle {
-            sprite: Sprite {
-                color: Color::BLACK,
-                custom_size: Some(Vec2::new(GRID_SQUARE_SIZE as f32, GRID_SQUARE_SIZE as f32)),
-                ..Default::default()
-            },
-            transform: Transform::default().with_translation(Vec3::new(0.0, 0.0, 1.0)),
-            ..Default::default()
-        },
-    });
+    spawn_box(&mut commands, Position { x: 4, y: 6 });
 
-    commands.spawn(BoxBundle {
-        box_block: BoxBlock,
-        movable: Movable,
-        position: Position { x: 4, y: 6 },
-        sprite: SpriteBundle {
-            sprite: Sprite {
-                color: Color::RED,
-                custom_size: Some(Vec2::new(GRID_SQUARE_SIZE as f32, GRID_SQUARE_SIZE as f32)),
-                ..Default::default()
-            },
-            transform: Transform::default().with_translation(Vec3::new(0.0, 0.0, 1.0)),
-            ..Default::default()
-        },
-    });
-
-    commands.spawn(ConveyorBundle {
-        conveyor: Conveyor,
-        position: Position { x: 5, y: 6 },
-        direction: Direction(Dir::Down),
-        sprite: SpriteBundle {
-            sprite: Sprite {
-                color: Color::GREEN,
-                custom_size: Some(Vec2::new(GRID_SQUARE_SIZE as f32, GRID_SQUARE_SIZE as f32)),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-    });
+    spawn_conveyor(&mut commands, Position { x: 5, y: 6 }, Direction(Dir::Down));
+    spawn_conveyor(&mut commands, Position { x: 3, y: 5 }, Direction(Dir::Up));
 }
 
 fn update_display_position(mut query: Query<(&Position, &mut Transform)>) {
@@ -228,7 +251,11 @@ fn update_display_position(mut query: Query<(&Position, &mut Transform)>) {
     }
 }
 
-fn process_move(mut move_commands: ResMut<MoveCommands>, mut movable_query: Query<(Entity, &mut Position), With<Movable>>, immovable_query: Query<&Position, (Without<Movable>, With<Immovable>)>) {
+fn process_move(
+    mut move_commands: ResMut<MoveCommands>,
+    mut movable_query: Query<(Entity, &mut Position), With<Movable>>,
+    immovable_query: Query<&Position, (Without<Movable>, With<Immovable>)>,
+) {
     for command in move_commands.commands.iter() {
         let movables = {
             let mut tmp = HashMap::new();
@@ -241,18 +268,28 @@ fn process_move(mut move_commands: ResMut<MoveCommands>, mut movable_query: Quer
         let mut to_move = HashSet::new();
         for entity in command.entities.iter() {
             let mut tmp_to_move = HashSet::new();
-            let mut current_pos = movable_query.get(*entity).expect("Entity that moves should be movable").1.to_tuple();
+            let mut current_pos = movable_query
+                .get(*entity)
+                .expect("Entity that moves should be movable")
+                .1
+                .to_tuple();
             while let Some(&entity) = movables.get(&current_pos) {
                 tmp_to_move.insert(entity);
                 current_pos = add_delta(current_pos, command.delta);
             }
-            if immovable_query.iter().any(|pos| pos.to_tuple() == current_pos) {
+            if immovable_query
+                .iter()
+                .any(|pos| pos.to_tuple() == current_pos)
+            {
                 continue;
             }
             to_move.extend(tmp_to_move);
         }
         for entity in to_move.iter() {
-            let mut position = movable_query.get_mut(*entity).expect("Entity that moves should be movable").1;
+            let mut position = movable_query
+                .get_mut(*entity)
+                .expect("Entity that moves should be movable")
+                .1;
             let new_pos = add_delta(position.to_tuple(), command.delta);
             position.x = new_pos.0;
             position.y = new_pos.1;
@@ -261,7 +298,11 @@ fn process_move(mut move_commands: ResMut<MoveCommands>, mut movable_query: Quer
     move_commands.commands.clear();
 }
 
-fn move_good_level_wall(keyboard_input: Res<Input<KeyCode>>, query: Query<(Entity, &Position), With<GoodLevelWall>>, mut move_commands: ResMut<MoveCommands>) {
+fn move_good_level_wall(
+    keyboard_input: Res<Input<KeyCode>>,
+    query: Query<(Entity, &Position), With<GoodLevelWall>>,
+    mut move_commands: ResMut<MoveCommands>,
+) {
     let delta = {
         if keyboard_input.just_pressed(KeyCode::Left) {
             (-1, 0)
@@ -277,7 +318,10 @@ fn move_good_level_wall(keyboard_input: Res<Input<KeyCode>>, query: Query<(Entit
     };
 
     move_commands.commands.push(MoveCommand {
-        entities: query.iter().map(|good_level_wall| good_level_wall.0).collect(),
+        entities: query
+            .iter()
+            .map(|good_level_wall| good_level_wall.0)
+            .collect(),
         delta,
     });
 }
@@ -299,7 +343,6 @@ fn conveyor_move(
     }
 }
 
-
 /// UTILS
 
 fn add_delta(pos: (u16, u16), delta: (i16, i16)) -> (u16, u16) {
@@ -318,24 +361,4 @@ fn add_delta(pos: (u16, u16), delta: (i16, i16)) -> (u16, u16) {
     }
 
     (to_check.0 as u16, to_check.1 as u16)
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-enum Dir {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-impl Dir {
-    fn to_delta(&self) -> (i16, i16) {
-        match self {
-            Dir::Left => (-1, 0),
-            Dir::Right => (1, 0),
-            Dir::Up => (0, 1),
-            Dir::Down => (0, -1),
-        }
-    }
 }
