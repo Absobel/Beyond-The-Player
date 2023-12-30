@@ -8,13 +8,18 @@ fn main() {
         .add_systems(Startup, setup)
         // Set commands
         .add_systems(Update, move_good_level_wall)
-        .add_systems(Update, conveyor_move.after(move_good_level_wall))
+        .add_systems(Update, funnel_move.after(move_good_level_wall))
         // Process commands
-        .add_systems(Update, process_move.after(conveyor_move))
+        .add_systems(Update, process_move.after(funnel_move))
+        .add_systems(Update, undo)
         // Display
-        .add_systems(Update, update_display_position.after(process_move))
+        .add_systems(
+            Update,
+            update_display_position.after(process_move).after(undo),
+        )
         // The rest
         .insert_resource(MoveCommands { commands: vec![] })
+        .insert_resource(MoveHistory { moves: vec![] })
         .run();
 }
 
@@ -30,16 +35,43 @@ const fn level_coords_to_pxl_coords(x: u16, y: u16) -> (f32, f32) {
     ((x * GRID_SQUARE_SIZE) as f32, (y * GRID_SQUARE_SIZE) as f32)
 }
 
-/// RESOURCES
+/// RESOURCES UTILS
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MoveCause {
+    UserMove,
+    FunnelMove,
+}
 
 struct MoveCommand {
     entities: Vec<Entity>,
+    cause: MoveCause,
     delta: (i16, i16),
 }
+
+#[derive(Debug)]
+struct ActualMove {
+    entities: Vec<Entity>,
+    cause: MoveCause,
+    delta: (i16, i16),
+}
+
+impl ActualMove {
+    fn undo_delta(&self) -> (i16, i16) {
+        (-self.delta.0, -self.delta.1)
+    }
+}
+
+/// RESOURCES
 
 #[derive(Resource)]
 struct MoveCommands {
     commands: Vec<MoveCommand>,
+}
+
+#[derive(Resource)]
+struct MoveHistory {
+    moves: Vec<Vec<ActualMove>>, // Vec<AcutalMove> is all the moves in a single frame
 }
 
 // COMPONENTS UTILS
@@ -82,7 +114,7 @@ struct BadLevelWall;
 struct BoxBlock;
 
 #[derive(Component)]
-struct Conveyor;
+struct Funnel;
 
 /// OTHER COMPONENTS
 
@@ -134,8 +166,8 @@ struct BoxBundle {
 }
 
 #[derive(Bundle)]
-struct ConveyorBundle {
-    conveyor: Conveyor,
+struct FunnelBundle {
+    funnel: Funnel,
     position: Position,
     direction: Direction,
     sprite: SpriteBundle,
@@ -194,9 +226,9 @@ fn spawn_box(commands: &mut Commands, position: Position) {
     });
 }
 
-fn spawn_conveyor(commands: &mut Commands, position: Position, direction: Direction) {
-    commands.spawn(ConveyorBundle {
-        conveyor: Conveyor,
+fn spawn_funnel(commands: &mut Commands, position: Position, direction: Direction) {
+    commands.spawn(FunnelBundle {
+        funnel: Funnel,
         position,
         direction,
         sprite: SpriteBundle {
@@ -239,8 +271,13 @@ fn setup(mut commands: Commands) {
 
     spawn_box(&mut commands, Position { x: 4, y: 6 });
 
-    spawn_conveyor(&mut commands, Position { x: 5, y: 6 }, Direction(Dir::Down));
-    spawn_conveyor(&mut commands, Position { x: 3, y: 5 }, Direction(Dir::Up));
+    spawn_funnel(&mut commands, Position { x: 5, y: 6 }, Direction(Dir::Down));
+    spawn_funnel(
+        &mut commands,
+        Position { x: 5, y: 5 },
+        Direction(Dir::Right),
+    );
+    spawn_funnel(&mut commands, Position { x: 3, y: 5 }, Direction(Dir::Up));
 }
 
 fn update_display_position(mut query: Query<(&Position, &mut Transform)>) {
@@ -253,10 +290,17 @@ fn update_display_position(mut query: Query<(&Position, &mut Transform)>) {
 
 fn process_move(
     mut move_commands: ResMut<MoveCommands>,
+    mut move_history: ResMut<MoveHistory>,
     mut movable_query: Query<(Entity, &mut Position), With<Movable>>,
     immovable_query: Query<&Position, (Without<Movable>, With<Immovable>)>,
 ) {
     for command in move_commands.commands.iter() {
+        let mut actual_move = ActualMove {
+            entities: vec![],
+            cause: command.cause,
+            delta: command.delta,
+        };
+
         let movables = {
             let mut tmp = HashMap::new();
             for (entity, position) in movable_query.iter_mut() {
@@ -286,6 +330,7 @@ fn process_move(
             to_move.extend(tmp_to_move);
         }
         for entity in to_move.iter() {
+            actual_move.entities.push(*entity);
             let mut position = movable_query
                 .get_mut(*entity)
                 .expect("Entity that moves should be movable")
@@ -294,8 +339,38 @@ fn process_move(
             position.x = new_pos.0;
             position.y = new_pos.1;
         }
+        if actual_move.cause == MoveCause::UserMove || move_history.moves.is_empty() {
+            move_history.moves.push(vec![actual_move]);
+        } else if let Some(last_move) = move_history.moves.last_mut() {
+            last_move.push(actual_move);
+        } else {
+            unreachable!();
+        }
     }
     move_commands.commands.clear();
+}
+
+fn undo(
+    mut move_history: ResMut<MoveHistory>,
+    keyboard_input: Res<Input<KeyCode>>,
+    mut movable_query: Query<(Entity, &mut Position), With<Movable>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::U) {
+        dbg!(&move_history.moves);
+        if let Some(last_game_loop_move) = move_history.moves.pop() {
+            for last_move in last_game_loop_move.iter().rev() {
+                for entity in last_move.entities.iter() {
+                    let mut position = movable_query
+                        .get_mut(*entity)
+                        .expect("Entity that moves should be movable")
+                        .1;
+                    let new_pos = add_delta(position.to_tuple(), last_move.undo_delta());
+                    position.x = new_pos.0;
+                    position.y = new_pos.1;
+                }
+            }
+        }
+    }
 }
 
 fn move_good_level_wall(
@@ -322,20 +397,22 @@ fn move_good_level_wall(
             .iter()
             .map(|good_level_wall| good_level_wall.0)
             .collect(),
+        cause: MoveCause::UserMove,
         delta,
     });
 }
 
-fn conveyor_move(
-    conveyor_query: Query<(&Position, &Direction), With<Conveyor>>,
+fn funnel_move(
+    funnel_query: Query<(&Position, &Direction), With<Funnel>>,
     movable_query: Query<(Entity, &Position), With<Movable>>,
     mut move_commands: ResMut<MoveCommands>,
 ) {
-    for (conveyor_pos, direction) in conveyor_query.iter() {
+    for (funnel_pos, direction) in funnel_query.iter() {
         for (movable_entity, movable_pos) in movable_query.iter() {
-            if conveyor_pos.to_tuple() == movable_pos.to_tuple() {
+            if funnel_pos.to_tuple() == movable_pos.to_tuple() {
                 move_commands.commands.push(MoveCommand {
                     entities: vec![movable_entity],
+                    cause: MoveCause::FunnelMove,
                     delta: direction.to_delta(),
                 });
             }
