@@ -5,19 +5,34 @@ use bevy::prelude::*;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .configure_sets(Update, (MoveSystems, ProcessSystems, Display))
+        /////////
+        // Setup
         .add_systems(Startup, setup)
-        // Set commands
+        // Player Move
         .add_systems(Update, move_good_level_wall)
-        .add_systems(Update, funnel_move.after(move_good_level_wall))
+        // Set commands
+        .add_systems(
+            Update,
+            funnel_move
+                .in_set(MoveSystems)
+                .after(move_good_level_wall)
+        )
         // Process commands
-        .add_systems(Update, process_move.after(funnel_move))
-        .add_systems(Update, undo)
+        .add_systems(
+            Update,
+            (process_move, undo)
+                .in_set(ProcessSystems)
+                .after(MoveSystems),
+        )
         // Display
         .add_systems(
             Update,
-            update_display_position.after(process_move).after(undo),
+            update_display_position
+                .in_set(Display)
+                .after(ProcessSystems),
         )
-        // The rest
+        /////////
         .insert_resource(MoveCommands { commands: vec![] })
         .insert_resource(MoveHistory { moves: vec![] })
         .run();
@@ -35,21 +50,47 @@ const fn level_coords_to_pxl_coords(x: u16, y: u16) -> (f32, f32) {
     ((x * GRID_SQUARE_SIZE) as f32, (y * GRID_SQUARE_SIZE) as f32)
 }
 
+/// SYSTEM SETS
+
+#[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
+struct MoveSystems;
+
+#[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
+struct ProcessSystems;
+
+#[derive(SystemSet, Hash, Eq, PartialEq, Debug, Clone)]
+struct Display;
+
+/// CONDITIONS
+
+// Nothing for now...
+
 /// RESOURCES UTILS
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MoveCause {
     UserMove,
-    FunnelMove,
+    FunnelMove(PositionTuple),
 }
 
 struct MoveCommand {
-    entities: Vec<Entity>,
+    entities: Vec<(Entity, PositionTuple)>,
     cause: MoveCause,
     delta: (i16, i16),
 }
 
-#[derive(Debug)]
+impl MoveCommand {
+    fn keep_still_valid(&mut self) {
+        match self.cause {
+            MoveCause::UserMove => {}
+            MoveCause::FunnelMove(funnel_pos) => {
+                self.entities.retain(|(_, pos)| *pos == funnel_pos);
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 struct ActualMove {
     entities: Vec<Entity>,
     cause: MoveCause,
@@ -74,6 +115,19 @@ struct MoveHistory {
     moves: Vec<Vec<ActualMove>>, // Vec<AcutalMove> is all the moves in a single frame
 }
 
+impl MoveHistory {
+    fn last_actual_move(&self) -> Option<&ActualMove> {
+        self.moves
+            .last()
+            .and_then(|last_game_loop_move| last_game_loop_move.last())
+    }
+
+    fn last_move_cause(&self) -> Option<MoveCause> {
+        self.last_actual_move()
+            .map(|last_actual_move| last_actual_move.cause)
+    }
+}
+
 // COMPONENTS UTILS
 
 #[allow(dead_code)]
@@ -95,6 +149,8 @@ impl Dir {
         }
     }
 }
+
+type PositionTuple = (u16, u16);
 
 /// MARKER COMPONENTS
 
@@ -294,7 +350,9 @@ fn process_move(
     mut movable_query: Query<(Entity, &mut Position), With<Movable>>,
     immovable_query: Query<&Position, (Without<Movable>, With<Immovable>)>,
 ) {
-    for command in move_commands.commands.iter() {
+    for command in move_commands.commands.iter_mut() {
+        command.keep_still_valid();
+
         let mut actual_move = ActualMove {
             entities: vec![],
             cause: command.cause,
@@ -310,13 +368,8 @@ fn process_move(
         };
 
         let mut to_move = HashSet::new();
-        for entity in command.entities.iter() {
+        for (_, mut current_pos) in command.entities.iter() {
             let mut tmp_to_move = HashSet::new();
-            let mut current_pos = movable_query
-                .get(*entity)
-                .expect("Entity that moves should be movable")
-                .1
-                .to_tuple();
             while let Some(&entity) = movables.get(&current_pos) {
                 tmp_to_move.insert(entity);
                 current_pos = add_delta(current_pos, command.delta);
@@ -339,6 +392,7 @@ fn process_move(
             position.x = new_pos.0;
             position.y = new_pos.1;
         }
+        dbg!(&actual_move); // DEBUG
         if actual_move.cause == MoveCause::UserMove || move_history.moves.is_empty() {
             move_history.moves.push(vec![actual_move]);
         } else if let Some(last_move) = move_history.moves.last_mut() {
@@ -356,7 +410,6 @@ fn undo(
     mut movable_query: Query<(Entity, &mut Position), With<Movable>>,
 ) {
     if keyboard_input.just_pressed(KeyCode::U) {
-        dbg!(&move_history.moves);
         if let Some(last_game_loop_move) = move_history.moves.pop() {
             for last_move in last_game_loop_move.iter().rev() {
                 for entity in last_move.entities.iter() {
@@ -395,7 +448,7 @@ fn move_good_level_wall(
     move_commands.commands.push(MoveCommand {
         entities: query
             .iter()
-            .map(|good_level_wall| good_level_wall.0)
+            .map(|(entity, position)| (entity, position.to_tuple()))
             .collect(),
         cause: MoveCause::UserMove,
         delta,
@@ -411,8 +464,8 @@ fn funnel_move(
         for (movable_entity, movable_pos) in movable_query.iter() {
             if funnel_pos.to_tuple() == movable_pos.to_tuple() {
                 move_commands.commands.push(MoveCommand {
-                    entities: vec![movable_entity],
-                    cause: MoveCause::FunnelMove,
+                    entities: vec![(movable_entity, movable_pos.to_tuple())],
+                    cause: MoveCause::FunnelMove(funnel_pos.to_tuple()),
                     delta: direction.to_delta(),
                 });
             }
