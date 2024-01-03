@@ -14,9 +14,7 @@ fn main() {
         // Set commands
         .add_systems(
             Update,
-            funnel_move
-                .in_set(MoveSystems)
-                .after(move_good_level_wall)
+            funnel_move.in_set(MoveSystems).after(move_good_level_wall),
         )
         // Process commands
         .add_systems(
