@@ -1,6 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use bevy::prelude::*;
+use bevy::{
+    prelude::*,
+    render::{mesh, render_resource::PrimitiveTopology},
+    sprite::{MaterialMesh2dBundle, Mesh2dHandle},
+};
 
 fn main() {
     App::new()
@@ -224,7 +228,7 @@ struct FunnelBundle {
     funnel: Funnel,
     position: Position,
     direction: Direction,
-    sprite: SpriteBundle,
+    mesh: MaterialMesh2dBundle<ColorMaterial>,
 }
 
 /// SYSTEMS UTILS
@@ -280,17 +284,55 @@ fn spawn_box(commands: &mut Commands, position: Position) {
     });
 }
 
-fn spawn_funnel(commands: &mut Commands, position: Position, direction: Direction) {
+fn funnel_mesh_vertices(direction: &Dir) -> Vec<[f32; 3]> {
+    let grid_size = GRID_SQUARE_SIZE as f32;
+    let semi_grid_size = grid_size / 2.0;
+    match direction {
+        Dir::Left => vec![
+            [grid_size, 0.0, 0.0],       // bottom right
+            [grid_size, grid_size, 0.0], // top right
+            [0.0, semi_grid_size, 0.0],  // middle left
+        ],
+        Dir::Right => vec![
+            [0.0, 0.0, 0.0],                  // bottom left
+            [0.0, grid_size, 0.0],            // top left
+            [grid_size, semi_grid_size, 0.0], // middle right
+        ],
+        Dir::Up => vec![
+            [0.0, 0.0, 0.0],                  // bottom left
+            [grid_size, 0.0, 0.0],            // bottom right
+            [semi_grid_size, grid_size, 0.0], // middle top
+        ],
+        Dir::Down => vec![
+            [0.0, grid_size, 0.0],       // top left
+            [grid_size, grid_size, 0.0], // top right
+            [semi_grid_size, 0.0, 0.0],  // middle bottom
+        ],
+    }
+}
+
+fn spawn_funnel(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<ColorMaterial>>,
+    position: Position,
+    direction: Direction,
+) {
+    let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, funnel_mesh_vertices(&direction.0));
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 0.0, 1.0]; 3]);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 0.0]; 3]);
+    mesh.set_indices(Some(mesh::Indices::U32(vec![0, 1, 2])));
+    let handle_mesh = meshes.add(mesh);
+    let handle_color = materials.add(Color::GREEN.into());
+
     commands.spawn(FunnelBundle {
         funnel: Funnel,
         position,
         direction,
-        sprite: SpriteBundle {
-            sprite: Sprite {
-                color: Color::GREEN,
-                custom_size: Some(Vec2::new(GRID_SQUARE_SIZE as f32, GRID_SQUARE_SIZE as f32)),
-                ..Default::default()
-            },
+        mesh: MaterialMesh2dBundle {
+            mesh: Mesh2dHandle(handle_mesh),
+            material: handle_color,
             ..Default::default()
         },
     });
@@ -298,7 +340,11 @@ fn spawn_funnel(commands: &mut Commands, position: Position, direction: Directio
 
 /// SYSTEMS
 
-fn setup(mut commands: Commands) {
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
     commands.spawn(Camera2dBundle::default());
 
     let level_pxl_size = level_coords_to_pxl_coords(LEVEL_X_MAX, LEVEL_Y_MAX);
@@ -325,20 +371,39 @@ fn setup(mut commands: Commands) {
 
     spawn_box(&mut commands, Position { x: 4, y: 6 });
 
-    spawn_funnel(&mut commands, Position { x: 5, y: 6 }, Direction(Dir::Down));
     spawn_funnel(
         &mut commands,
+        &mut meshes,
+        &mut materials,
+        Position { x: 5, y: 6 },
+        Direction(Dir::Down),
+    );
+    spawn_funnel(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
         Position { x: 5, y: 5 },
         Direction(Dir::Right),
     );
-    spawn_funnel(&mut commands, Position { x: 3, y: 5 }, Direction(Dir::Up));
+    spawn_funnel(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        Position { x: 3, y: 5 },
+        Direction(Dir::Up),
+    );
 }
 
-fn update_display_position(mut query: Query<(&Position, &mut Transform)>) {
-    for (position, mut transform) in query.iter_mut() {
+fn update_display_position(mut query: Query<(&Position, &mut Transform, Option<&Sprite>)>) {
+    for (position, mut transform, sprite) in query.iter_mut() {
         let pxl_coords = level_coords_to_pxl_coords(position.x, position.y);
-        transform.translation.x = pxl_coords.0 + GRID_SQUARE_SIZE as f32 / 2.0;
-        transform.translation.y = pxl_coords.1 + GRID_SQUARE_SIZE as f32 / 2.0;
+        let offset = if sprite.is_some() {
+            GRID_SQUARE_SIZE as f32 / 2.0
+        } else {
+            0.0
+        };
+        transform.translation.x = pxl_coords.0 + offset;
+        transform.translation.y = pxl_coords.1 + offset;
     }
 }
 
